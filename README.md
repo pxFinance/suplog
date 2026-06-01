@@ -1,4 +1,4 @@
-# Suplog [![GoDoc](https://godoc.org/github.com/xlab/suplog?status.svg)](https://godoc.org/github.com/xlab/suplog)
+# Suplog [![GoDoc](https://godoc.org/github.com/pxFinance/suplog?status.svg)](https://godoc.org/github.com/pxFinance/suplog)
 
 A supercharged logging framework based upon [github.com/sirupsen/logrus](https://github.com/sirupsen/logrus), which enables structured, leveled logging with hooks support. Hooks are middleware modules for logging that can augment message being logged or even send it to a remote server.
 
@@ -13,13 +13,13 @@ NewLogger(wr io.Writer, formatter Formatter, hooks ...Hook) Logger
 ```
 
 Available formatters:
-* `suplog.TextFormatter` — suplogs log entries as text lines for TTY or without TTY colors (`LOG_FORMATTER=text`)
-* `suplog.JSONFormatter` — suplogs all log entries as JSON objects (`LOG_FORMATTER=json`)
+* `suplog.JSONFormatter` — suplogs all log entries as JSON objects
+* `suplog.TextFormatter` — suplogs log entries as text lines for TTY or without TTY colors.
 
 Available hooks:
-* [github.com/xlab/suplog/hooks/debug](https://github.com/xlab/suplog/blob/master/hooks/debug/hook.go#L14)
-* [github.com/xlab/suplog/hooks/blob](https://github.com/xlab/suplog/blob/master/hooks/blob/hook.go#L14)
-* [github.com/xlab/suplog/hooks/bugsnag](https://github.com/xlab/suplog/blob/master/hooks/bugsnag/hook.go#L13)
+* [github.com/pxFinance/suplog/hooks/debug](https://github.com/pxFinance/suplog/blob/master/hooks/debug/hook.go#L14)
+* [github.com/pxFinance/suplog/hooks/blob](https://github.com/pxFinance/suplog/blob/master/hooks/blob/hook.go#L14)
+* [github.com/pxFinance/suplog/hooks/bugsnag](https://github.com/pxFinance/suplog/blob/master/hooks/bugsnag/hook.go#L13)
 
 ## Leveled Logging
 
@@ -93,7 +93,7 @@ During suplog initialisation it is possible to specify suplog hooks. Hooks are p
 Debug hook adds information about caller fn name and position is source code. By default applies only to `Debug` and `Trace` entries, but can be extended to any level.
 
 ```go
-import debugHook github.com/xlab/suplog/hooks/debug
+import debugHook github.com/pxFinance/suplog/hooks/debug
 ```
 
 Options:
@@ -105,7 +105,7 @@ type HookOptions struct {
     // Levels enables this hook for all listed levels.
     Levels []logrus.Level
     // PathSegmentsLimit allows to trim amount of source code file path segments.
-    // Untrimmed: /Users/xlab/Documents/dev/go/src/github.com/xlab/suplog/default_test.go
+    // Untrimmed: /Users/xlab/Documents/dev/go/src/github.com/pxFinance/suplog/default_test.go
     // Trimmed (3): xlab/suplog/default_test.go
     PathSegmentsLimit int
 }
@@ -118,7 +118,7 @@ If not specified, AppVersion is set from **APP_VERSION** env variable. PathSegme
 Bugsnag hook implements integration with [Bugsnag.com](https://app.bugsnag.com) service for error tracing and monitoring. It will send any entry above warning level, including its meta data and stack trace.
 
 ```go
-import bugsnagHook github.com/xlab/suplog/hooks/bugsnag
+import bugsnagHook github.com/pxFinance/suplog/hooks/bugsnag
 ```
 
 Options:
@@ -143,13 +143,14 @@ The hook can be enabled in default suplogger by setting OS ENV variables:
 * APP_ENV (e.g. `test`, `staging` or `prod`)
 * APP_VERSION
 * LOG_BUGSNAG_KEY
+* **LOG_BUGSNAG_ENABLED** — this option enables bugsnag in default suplogger for existing codebase.
 
 ### Blob Uploads
 
 Blob hook allows to upload heavy blobs of data such as request and response HTML / JSON dumps into a remote log storage. This hook utilizes Amazon S3 interface, therefore is compatible with any S3-like API.
 
 ```go
-import blobHook github.com/xlab/suplog/hooks/blob
+import blobHook github.com/pxFinance/suplog/hooks/blob
 ```
 
 Options:
@@ -179,6 +180,7 @@ The following OS ENV variables are mapped:
 * LOG_BLOB_STORE_ENDPOINT
 * LOG_BLOB_STORE_REGION
 * LOG_BLOB_STORE_BUCKET
+* **LOG_BLOB_ENABLED** — this option enables blob in default suplogger for existing codebase.
 
 How to use:
 
@@ -187,3 +189,124 @@ log.WithField("blob", testBlob).Infoln("test is running, trying to submit blob")
 ```
 
 Where field name should be exactly `blob` and `testBlob` should be `[]byte`.
+
+# Conditional triggers
+It will only log if the condition is met, otherwise it will return a `NoOp` logger.
+
+## `OnCondition`
+
+### Description
+Returns a `ConditionLogger` if the provided condition is `true`. If the condition is `false`, it returns a `NoOp` logger. If a logger is provided in the variadic argument, only the first logger is used.
+
+### Behavior
+- If `cond` is `true`, the function returns the first logger provided (or the default logger if none is provided).
+- If `cond` is `false`, it returns a `NoOp` logger.
+
+### Usage
+```go
+log.OnCondition(x > 0).WithField("foo", "bar").Info("This will log because condition is true")
+````
+
+---
+
+## `OnErr`
+Logs only if the provided error is not `nil`.
+
+### Description
+Returns a `ConditionLogger` if the provided error is not `nil`. If the error is `nil`, it returns a `NoOp` logger. If a logger is provided in the variadic argument, only the first logger is used.
+
+### Parameters
+- `err error`: The error to check.
+- `logger ...Logger`: Optional variadic argument for the logger to use.
+
+### Behavior
+- If `err` is not `nil`, the function returns a logger with the error attached.
+- If `err` is `nil`, it returns a `NoOp` logger.
+ 
+### Usage
+```go
+log.OnError(someErr).WithField("foo", "bar").Info("something happened")
+```
+
+---
+
+## `OnTime`
+Receives a ticker/timer, if if the time is met, it will log. This is useful for preventing excessive logging
+when log frequency is too high, similar to sampling
+
+### Description
+Returns a `ConditionLogger` if the provided tick channel receives a tick. If no tick is received, it returns a `NoOp` logger. The function checks the channel non-blockingly.
+
+### Behavior
+- If a tick is received from the channel, the function returns the first logger provided (or the default logger if none is provided).
+- If no tick is received, it returns a `NoOp` logger.
+
+### Usage
+```go
+ticker := time.NewTicker(1 * time.Minute)
+log.OnTime(ticker.C).WithField("foo", "bar").Info("This will log every minute at most")
+```
+
+## Context Logger (`logcontext`)
+
+This package provides a mechanism for storing a `suplog.Logger` within a `context.Context` and allowing it to be mutated (e.g., adding new fields) by downstream functions in a **thread-safe** manner.
+
+Usage
+1. Initialization (Top-Level Middleware)
+   Initialize the logger once at the start of your request, typically in the first middleware.
+
+```go
+func LoggingMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // Create your base logger
+        baseLogger := suplog.NewLogger(/* ... */)
+
+        // Put it in the context using the package
+        ctx := logctx.WithLogger(r.Context(), baseLogger)
+        
+        // The defer runs last, after all other handlers
+        defer func() {
+            // Get the logger (which now has all fields) and log
+            finalLogger := logctx.Logger(ctx)
+            finalLogger.Info("Request finished")
+        }()
+
+        // Pass the context down the chain
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+```
+2. Adding Fields (Downstream Middlewares/Handlers)
+   Any other function can now add fields. They do not need to create a new context, as the logger is mutated in place.
+
+```go
+func AuthMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    // This mutates the logger in the context
+        logctx.WithField(r.Context(), "user_id", "user-abc")
+        next.ServeHTTP(w, r)
+    })
+}
+
+func MyHandler(w http.ResponseWriter, r *http.Request) {
+    // This also mutates the same logger
+    logctx.WithFields(r.Context(), suplog.Fields{
+        "request_id": "req-123",
+        "foo": "bar",
+    })
+
+    // You can also retrieve it to log here
+    logger := logctx.Logger(r.Context())
+    logger.Info("Handler executing") // This log will have user_id, request_id, etc.
+
+    w.Write([]byte("OK"))
+}
+```
+
+3. Retrieving the Logger
+   To get the current state of the logger at any time (e.g., for logging in a handler), use LoggerFromContext.
+This function is thread-safe and will always return the most up-to-date logger.
+```go
+logger := logctx.Logger(ctx)
+logger.Info("Hello")
+```

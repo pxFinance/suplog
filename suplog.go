@@ -8,23 +8,19 @@ import (
 	"sync"
 	"time"
 
-	debugHook "github.com/xlab/suplog/hooks/debug"
+	blobHook "github.com/pxFinance/suplog/hooks/blob"
+	bugsnagHook "github.com/pxFinance/suplog/hooks/bugsnag"
+	debugHook "github.com/pxFinance/suplog/hooks/debug"
 
 	"github.com/sirupsen/logrus"
-	"github.com/xlab/closer"
-	"github.com/xlab/suplog/stackcache"
+
+	"github.com/pxFinance/suplog/stackcache"
 )
 
-// NewLogger constructs a new suplogger. The default formatter would be TextFormatter
-// if not overrident by and env variable.
+// NewLogger constructs a new suplogger.
 func NewLogger(wr io.Writer, formatter Formatter, hooks ...Hook) Logger {
 	if formatter == nil {
-		switch os.Getenv("LOG_FORMATTER") {
-		case "json":
-			formatter = new(JSONFormatter)
-		default:
-			formatter = new(TextFormatter)
-		}
+		formatter = new(JSONFormatter)
 	}
 
 	log := &suplogger{
@@ -33,7 +29,7 @@ func NewLogger(wr io.Writer, formatter Formatter, hooks ...Hook) Logger {
 			Formatter: formatter,
 			Hooks:     make(LevelHooks),
 			Level:     DebugLevel,
-			ExitFunc:  closer.Exit,
+			ExitFunc:  os.Exit,
 		},
 
 		writer:           wr,
@@ -45,6 +41,8 @@ func NewLogger(wr io.Writer, formatter Formatter, hooks ...Hook) Logger {
 	log.reloadStackTraceCache()
 	log.entry = log.logger.WithContext(context.Background())
 
+	log.logger.AddHook(&deferredHook{})
+	log.logger.AddHook(&errLevelHook{}) // needs to be after deferredHook
 	for _, h := range hooks {
 		log.AddHook(h)
 	}
@@ -76,27 +74,21 @@ func (l *suplogger) initOnce() {
 			l.writer = os.Stderr
 		}
 
-		var formatter Formatter
-		switch os.Getenv("LOG_FORMATTER") {
-		case "json":
-			formatter = new(JSONFormatter)
-		default:
-			formatter = new(TextFormatter)
-		}
-
 		// otherwise init output with conservative defaults
 		l.logger = &logrus.Logger{
 			Out:       l.writer,
-			Formatter: formatter,
+			Formatter: new(JSONFormatter),
 			Hooks:     make(LevelHooks),
 			Level:     DebugLevel,
-			ExitFunc:  closer.Exit,
+			ExitFunc:  os.Exit,
 		}
 
 		l.entry = l.logger.WithContext(context.Background())
 		l.reloadStackTraceCache()
 		l.addDefaultHooks()
 		l.mux = new(sync.Mutex)
+		l.logger.AddHook(&deferredHook{})
+		l.logger.AddHook(&errLevelHook{}) // needs to be after deferredHook
 		l.initDone = true
 	})
 }
@@ -106,7 +98,7 @@ const defaultStackSearchOffset = 1
 // reloadStackTraceCache allows to reload the stack trace reporter with new offset,
 // allowing to wrap suplogger into other funcs.
 func (l *suplogger) reloadStackTraceCache() {
-	l.stack = stackcache.New(defaultStackSearchOffset, l.stackTraceOffset, "github.com/xlab/suplog")
+	l.stack = stackcache.New(defaultStackSearchOffset, l.stackTraceOffset, "github.com/pxFinance/suplog")
 }
 
 // addDefaultHooks initializes default hooks and additional hooks
@@ -119,16 +111,13 @@ func (l *suplogger) addDefaultHooks() {
 
 	l.logger.AddHook(debugHook.NewHook(hookLogger, nil))
 
-	// This has been there for ages, but makes no sense in long run,
-	// also adds too much dependencies into the go mod.
-	//
-	// if isTrue(os.Getenv("LOG_BLOB_ENABLED")) {
-	// 	l.logger.AddHook(blobHook.NewHook(hookLogger, nil))
-	// }
-	//
-	// if isTrue(os.Getenv("LOG_BUGSNAG_ENABLED")) {
-	// 	l.logger.AddHook(bugsnagHook.NewHook(hookLogger, nil))
-	// }
+	if isTrue(os.Getenv("LOG_BLOB_ENABLED")) {
+		l.logger.AddHook(blobHook.NewHook(hookLogger, nil))
+	}
+
+	if isTrue(os.Getenv("LOG_BUGSNAG_ENABLED")) {
+		l.logger.AddHook(bugsnagHook.NewHook(hookLogger, nil))
+	}
 }
 
 // Adds a field to the log entry, note that it doesn't log until you call
@@ -156,6 +145,11 @@ func (l *suplogger) WithFields(fields Fields) Logger {
 // Add an error as single field to the log entry.  All it does is call
 // `WithError` for the given `error`.
 func (l *suplogger) WithError(err error) Logger {
+	if err == nil {
+		// nothing to add
+		return l
+	}
+
 	l.initOnce()
 	outCopy := l.copy()
 	outCopy.entry = l.entry.WithError(err)
@@ -177,6 +171,26 @@ func (l *suplogger) WithTime(t time.Time) Logger {
 	l.initOnce()
 	outCopy := l.copy()
 	outCopy.entry = l.entry.WithTime(t)
+
+	return outCopy
+}
+
+func (l *suplogger) DeferError(err *error) Logger {
+	return l.WithField(deferredFieldKey+logrus.ErrorKey, err)
+}
+
+func (l *suplogger) Defer(k string, v interface{}) Logger {
+	return l.WithField(deferredFieldKey+k, v)
+}
+
+func (l *suplogger) ErrLevel(level Level) Logger {
+	l.initOnce()
+
+	// prepare new context with error level
+	ctx := context.WithValue(l.entry.Context, errLvlCtxKey{}, level)
+
+	outCopy := l.copy()
+	outCopy.entry = l.entry.WithContext(ctx)
 
 	return outCopy
 }

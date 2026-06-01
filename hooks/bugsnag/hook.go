@@ -8,7 +8,7 @@ import (
 	bugsnag "github.com/bugsnag/bugsnag-go"
 	"github.com/sirupsen/logrus"
 
-	"github.com/xlab/suplog/stackcache"
+	"github.com/pxFinance/suplog/stackcache"
 )
 
 // HookOptions allows to set additional Hook options.
@@ -71,7 +71,7 @@ func checkHookOptions(opt *HookOptions) *HookOptions {
 	if len(opt.BugsnagPackages) == 0 {
 		opt.BugsnagPackages = []string{
 			"main",
-			"github.com/xlab/suplog/*",
+			"github.com/pxFinance/suplog/*",
 		}
 	}
 
@@ -100,7 +100,7 @@ func NewHook(logger RootLogger, opt *HookOptions) logrus.Hook {
 	return &hook{
 		opt:    opt,
 		logger: logger,
-		stack:  stackcache.New(defaultStackSearchOffset, opt.StackTraceOffset, "github.com/xlab/suplog"),
+		stack:  stackcache.New(defaultStackSearchOffset, opt.StackTraceOffset, "github.com/pxFinance/suplog"),
 		notifier: bugsnag.New(bugsnag.Configuration{
 			APIKey:              opt.BugsnagAPIKey,
 			ReleaseStage:        opt.Env,
